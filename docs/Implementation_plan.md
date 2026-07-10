@@ -14,8 +14,9 @@
 | Step 6 | FastAPI 服务与 Obsidian 对接 | ✅ |
 | Step 7 | MCP 服务（供 AI Agent 标准协议调用） | ✅ |
 | Step 8 | 两步走分层问答（Wiki 优先 → 降级 Processed） | ✅ |
-| Step 9 | 定时抓取与音视频处理 | 🔜 |
-| Step 10 | 多学生协作与学习分析 | 🔜 |
+| Step 9 | 定时调度器 (Scheduler 模块) | 🔜 |
+| Step 10 | 音视频处理 (PDF/图片/音视频) | 🔜 |
+| Step 11 | 多学生协作与学习分析 | 🔜 |
 
 本文档基于定稿的 V2.1 架构（含确定性打分、LiteLLM 国产模型适配、Karpathy Wiki 编译理念）编制。开发遵循"自底向上、先跑通主链路再叠加智能化"的原则。
 
@@ -104,7 +105,26 @@
      * 将簇内的 `processed/*.md` 复制到临时工作区，调用 `llmwiki` 进行编译（建议用 Kimi 128k 模型）。
      * 后处理：用 Step 3 算出的确定性关联，覆盖 LLM 生成的悬空双链。
      * 将最终综述页保存至 `wiki/` 目录，并更新索引层。
-### Step 7: 云端同步配置 (GitHub)
+## Step 9: 定时调度器 (Scheduler 模块)
+* **目标**：实现每日自动归档知乎收藏夹 / GitHub Trending 等来源，打通"定时触发 → 抓取 → 加工 → 索引 → Wiki"全链路。
+* **设计文档**：`docs/scheduler-design.md`
+* **动作**：
+  1. 创建 `src/scheduler/` 包：`config.py` (声明式任务配置) + `tasks.py` (可复用任务函数) + `daemon.py` (APScheduler 内嵌可选)。
+  2. 实现 `tasks.py` 核心任务：`fetch_zhihu_collections()`, `fetch_github_trending()`, `run_pipeline()`, `run_daily()`。
+  3. 实现 `daemon.py`：APScheduler 内嵌到 `kb serve`，每天 08:00 自动执行 `run_daily()`。
+  4. 实现 `kb schedule` CLI 子命令：列出状态 / 手动触发单任务 / 启用禁用。
+  5. 可选：Windows Task Scheduler XML 模板，一行命令注册系统定时任务。
+* **产出**：一条 `kb serve` 命令即启动定时归档，知识库每日自动生长。
+* **验收**：
+  * `kb serve` 启动后，日志显示 "Scheduler: daily_pipeline 已注册 (08:00)"
+  * `kb schedule run daily` 手动触发全流程成功
+  * 知乎收藏夹自动抓取后，processed/ 内有对应笔记，关联关系正确
+
+### Step 10: 音视频处理 (拓展)
+
+### Step 11: 多学生协作与学习分析 (拓展)
+
+### 云端同步配置 (GitHub, 基础设施)
 * **目标**：实现多端同步与版本控制。
 * **动作**：
   1. 在 `my_kb/` 执行 `git init` 并关联 GitHub 私有仓库。

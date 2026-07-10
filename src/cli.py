@@ -12,6 +12,8 @@
     kb serve [--host] [--port]      启动 FastAPI 服务 (供 Obsidian 侧边栏)
     kb list [raw|processed|wiki]    列出条目
     kb stats                        显示各层统计
+    kb schedule status              查看定时调度器状态
+    kb schedule run [daily|zhihu|trending|pipeline]  手动触发任务
 
 返回码: 0 成功，1 业务错误，2 参数错误。
 """
@@ -258,6 +260,55 @@ def cmd_mcp(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_schedule(args: argparse.Namespace) -> int:
+    """定时调度器管理: 查看状态 / 手动触发单任务或全流程。"""
+    from src.scheduler import config, tasks
+
+    if args.action == "status":
+        from src.scheduler.daemon import get_scheduler_info
+        info = get_scheduler_info()
+        _emit(f"调度器运行中: {info['running']}")
+        _emit(f"时区: {config.TIMEZONE}")
+        _emit(f"每日触发: {config.DAILY_HOUR:02d}:{config.DAILY_MINUTE:02d}")
+        _emit(f"知乎收藏夹: {len(config.ZHIHU_COLLECTIONS)} 个")
+        _emit(f"Trending 语言: {', '.join(config.TRENDING_LANGUAGES)}")
+        for job in info["jobs"]:
+            _emit(f"  任务 {job['id']} | 下次: {job['next_run']} | {job['trigger']}")
+        if not info["jobs"] and not info["running"]:
+            _emit("  (调度器未启动 — 运行 kb serve 自动启动)")
+        return 0
+
+    if args.action == "run":
+        task_name = args.task
+        if task_name == "daily":
+            results = tasks.run_daily()
+            for r in results:
+                status = "OK" if r.success else f"FAIL: {r.error}"
+                _emit(f"  {r.name} | {r.entries} 篇 | {r.duration:.1f}s | {status}")
+                for d in r.detail:
+                    _emit(f"    {d}")
+            return 0 if all(r.success for r in results) else 1
+        # 单任务
+        fn_map = {
+            "zhihu": tasks.fetch_zhihu_collections,
+            "trending": tasks.fetch_github_trending,
+            "pipeline": tasks.run_pipeline,
+        }
+        fn = fn_map.get(task_name)
+        if not fn:
+            _emit(f"未知任务: {task_name} (可选: daily/zhihu/trending/pipeline)", file=sys.stderr)
+            return 2
+        r = fn()
+        status = "OK" if r.success else f"FAIL: {r.error}"
+        _emit(f"  {r.name} | {r.entries} 篇 | {r.duration:.1f}s | {status}")
+        for d in r.detail:
+            _emit(f"    {d}")
+        return 0 if r.success else 1
+
+    _emit(f"未知操作: {args.action}", file=sys.stderr)
+    return 2
+
+
 # ---------- 解析器构建 ----------
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -330,6 +381,14 @@ def build_parser() -> argparse.ArgumentParser:
     # mcp
     p = sub.add_parser("mcp", help="启动 MCP 服务 (stdio，供 AI Agent 调用)")
     p.set_defaults(func=cmd_mcp)
+
+    # schedule
+    p = sub.add_parser("schedule", help="定时调度器管理")
+    p.add_argument("action", choices=["status", "run"],
+                   help="status: 查看调度状态 | run: 手动触发任务")
+    p.add_argument("task", nargs="?", default="daily",
+                   help="run 时的任务名: daily(默认) / zhihu / trending / pipeline")
+    p.set_defaults(func=cmd_schedule)
 
     return parser
 

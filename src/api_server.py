@@ -247,6 +247,31 @@ def create_app() -> "FastAPI":
             )
         return {"compiled": [p.name for p in paths]}
 
+    # ---- 调度器状态 ----
+    @app.get("/scheduler")
+    def scheduler_status():
+        from src.scheduler.daemon import get_scheduler_info
+        return get_scheduler_info()
+
+    @app.post("/scheduler/run")
+    def scheduler_run_now():
+        """手动触发一次每日全流程。"""
+        from src.scheduler import tasks
+        results = tasks.run_daily()
+        return {
+            "results": [
+                {
+                    "name": r.name,
+                    "success": r.success,
+                    "entries": r.entries,
+                    "duration": round(r.duration, 1),
+                    "error": r.error,
+                    "detail": r.detail,
+                }
+                for r in results
+            ]
+        }
+
     # ---- 统计 ----
     @app.get("/stats")
     def stats():
@@ -265,12 +290,23 @@ def create_app() -> "FastAPI":
 
 
 def run_server(host: str = "127.0.0.1", port: int = 8000) -> None:
-    """启动 FastAPI 服务 (uvicorn)。"""
+    """启动 FastAPI 服务 (uvicorn) + 后台定时调度器。"""
     if not _HAS_FASTAPI:
         raise ImportError(
             "FastAPI/uvicorn 未安装，请运行: pip install fastapi uvicorn"
         )
     import uvicorn
+    from src.scheduler.daemon import start_scheduler, stop_scheduler
+
     app = create_app()
     logger.info("启动 API 服务: http://%s:%d", host, port)
-    uvicorn.run(app, host=host, port=port, log_level="info")
+
+    # 启动后台调度器
+    scheduler_started = start_scheduler()
+    if scheduler_started:
+        logger.info("定时调度器随 serve 启动 (GET /scheduler 查看状态)")
+
+    try:
+        uvicorn.run(app, host=host, port=port, log_level="info")
+    finally:
+        stop_scheduler()

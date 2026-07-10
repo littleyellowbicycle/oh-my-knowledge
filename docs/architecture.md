@@ -277,6 +277,19 @@ summaries.json (摘要卡片):
 
 ---
 
+### 模块 S：定时调度器 (V2)
+
+职责：定时触发归档任务，复用 Gateway + Workflow 公开接口，零改动现有模块。
+
+```
+scheduler/
+├── config.py    # 声明式任务配置（用户编辑）
+├── tasks.py     # 任务函数（可被任何触发器调用）
+└── daemon.py    # APScheduler 内嵌守护（可选）
+```
+
+详见 `docs/scheduler-design.md`。
+
 ### 模块 C：输出引擎
 
 #### C1: 问答流
@@ -428,6 +441,7 @@ LLM 适配	LiteLLM  SDK 模式	Ollama 兼容 OpenAI 接口，一套代码双端�
 中文分词	jieba	运行时依赖	确定性关联打分基础
 Markdown 解析	python-frontmatter	运行时依赖	稳定读写 YAML Frontmatter
 双链提取	内置 re 正则	代码内逻辑	极简提取 [[]]，构建 links.json
+定时调度	APScheduler (可选)	runtime 依赖	内嵌到 kb serve 实现定时触发 (见 scheduler-design.md)
 Wiki 编译基座	llmwiki (Hosuke)	pip 包引入	Python 原生、支持 CJK、无向量库 pypi.org
 Wiki 编译蓝图	llm-wiki-compiler	参考实现	借鉴两阶段流水线、SHA-256 增量、Claim 溯源 csdn.net
 胶水层逻辑	自研 Python 模块	代码内逻辑	格式转换/触发判定/双链确定性覆盖
@@ -444,16 +458,24 @@ graph TD
     classDef processed fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px;
     classDef wiki fill:#fce4ec,stroke:#880e4f,stroke-width:2px,stroke-dasharray: 5 5;
     classDef index fill:#fff3e0,stroke:#e65100,stroke-width:2px;
+    classDef scheduler fill:#fff8e1,stroke:#f57f17,stroke-width:2px;
     classDef output fill:#f3e5f5,stroke:#4a148c,stroke-width:2px;
     classDef llm fill:#eeeeee,stroke:#424242,stroke-dasharray: 5 5;
+
+    subgraph Scheduler [模块 S: 定时调度器 V2]
+        S1[APScheduler / Task Scheduler<br/>每日 08:00 触发]:::scheduler
+        S2[tasks.py<br/>fetch_zhihu / fetch_trending<br/>run_pipeline]:::scheduler
+        S1 --> S2
+    end
 
     subgraph Gateway [模块 A: 输入网关 — 通道分层]
         A1[手动输入/想法]:::gateway
         Router[Channel Router<br/>URL → match() → channel]:::gateway
-        A1 --> Router
-        A3[定时拉取/API推送 V2]:::gateway
-        A4[文件解析/音视频 V3]:::gateway
-        Router -->|归一化| Normalize(统一入口 normalize):::gateway
+    A1 --> Router
+    S2 -->|定时调用| Router
+    A3[Scheduler 触发]:::gateway
+    A4[文件解析/音视频 V3]:::gateway
+    Router -->|归一化| Normalize(统一入口 normalize):::gateway
     end
 
     subgraph Channels [通道插件]
