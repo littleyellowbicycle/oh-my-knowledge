@@ -3,19 +3,17 @@
 职责:
     将原料层纯文本通过 LLM 加工为带 Frontmatter 的标准 Obsidian 笔记，
     落盘到 processed/ 目录。
+    集成标签约束 (方案A) + 标签归一化 (方案B)。
 
-流程 (对应 Implementation_plan Step 2):
+流程:
     1. 读取 raw 原文
-    2. 构造加工 Prompt (要求 2-3 句核心结论 + 含 [[]] 双链的正文 + 标签)
-    3. 调用 llm.chat_json(schema=ProcessedNote) 强类型校验
-    4. 用 python-frontmatter 拼装 .md
-    5. 写入 processed/
-    6. 标记原料状态为 processed
-    7. 触发关联引擎钩子 (Step 3 提供，本模块只回调不感知)
-
-对外暴露:
-    process_note(raw_id)                 -> Path   加工单篇原料
-    process_pending(on_processed=...)    -> list[Path]  批量加工所有 pending 原料
+    2. 构造加工 Prompt (含标签约束，要求优先复用高频标签)
+    3. 调用 llm.chat_json(schema=ProcessedNote)
+    4. 归一化 LLM 输出的 tags (同义词/模糊匹配折叠)
+    5. 用 python-frontmatter 拼装 .md
+    6. 写入 processed/
+    7. 标记原料状态为 processed
+    8. 触发关联引擎钩子
 """
 
 from __future__ import annotations
@@ -32,7 +30,9 @@ from src.config import settings
 from src.llm_adapter import llm, LLMError
 from src.raw_store import load_raw, mark_status, iter_pending
 from src.schemas import NoteType, ProcessedNote, RawStatus
-from src import relations as _relations  # 关联引擎钩子 (Step 3)
+from src import relations as _relations
+from src.tags import normalizer as _tag_normalizer
+from src.tags import prompt as _tag_prompt
 
 from src.gateway.channels._shared import detect_raw_type
 
@@ -50,7 +50,7 @@ _PROCESS_SYSTEM = (
     "你是一名知识管理编辑。把用户提供的原始材料加工成一篇结构化 Obsidian 笔记。"
     "要求: 1) 核心结论 2-3 句话，直击要害；"
     "2) 正文用中文重写，逻辑清晰，必须在关键概念处使用 [[双链]] 标记；"
-    "3) 标签 3-6 个，覆盖主题与领域；"
+    "3) 标签 3-6 个，覆盖主题与领域，优先复用已有标签；"
     "4) title 简洁有信息量，不带书名号/引号。"
 )
 
@@ -62,7 +62,8 @@ def _build_prompt(raw_text: str, source_url: Optional[str]) -> str:
         f"{src_line}\n\n"
         "===== 原始材料 =====\n"
         f"{raw_text}\n"
-        "===== 原始材料结束 =====\n"
+        "===== 原始材料结束 =====\n\n"
+        f"{_tag_prompt.tag_constraint_block()}\n"
     )
 
 
@@ -204,6 +205,8 @@ def process_note(
             model=model or settings.MODEL_PROCESS,
         )
         note.note_type = NoteType.CONTENT
+        # 方案B: 标签归一化 (同义词/模糊匹配折叠)
+        note.tags = _tag_normalizer.normalize_tags(note.tags)
 
     today = _dt.date.today().isoformat()
     content = _assemble_markdown(note, raw_id, entry.source_url, today)

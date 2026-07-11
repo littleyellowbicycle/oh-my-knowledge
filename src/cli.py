@@ -7,6 +7,8 @@
     kb process [--all|--raw <id>]   加工原料为 Obsidian 笔记 (含关联引擎钩子)
     kb index                        全量重建索引层
     kb relations rebuild            全量重算关联关系
+    kb tags rebuild [--dry-run]     重建标签本体 (方案B)
+    kb tags normalize [--dry-run]   归一化所有存量标签 (方案B)
     kb qa "<question>"              问答流 (查索引->读结论->作答)
     kb wiki [--all|--topic <tag>]   Wiki 编译 (关联簇 >= 3)
     kb wiki --lint                  Wiki 健康自检
@@ -100,6 +102,50 @@ def cmd_relations(args: argparse.Namespace) -> int:
         stats = relations.rebuild_all_relations()
         _emit(f"全量关联重算: {stats['updated']} 篇更新 / {stats['total']} 篇总")
         return 0
+    _emit(f"未知操作: {args.action}", file=sys.stderr)
+    return 2
+
+
+def cmd_tags(args: argparse.Namespace) -> int:
+    """标签管理: 本体重建 / 归一化。"""
+    from src.tags import ontology as _onto
+    from src.tags import normalizer as _norm
+
+    if args.action == "rebuild":
+        stats = _onto.build_ontology(
+            min_freq=args.min_freq,
+            fuzzy_threshold=args.threshold,
+            dry_run=args.dry_run,
+        )
+        if args.dry_run:
+            _emit("=== Dry-Run 报告 ===")
+            _emit(f"总标签数: {stats['total_tags']}")
+            _emit(f"规范标签数: {stats['canonical_forms']}")
+            _emit(f"种子合并: {stats['seed_merged']}")
+            _emit(f"自动合并: {stats['auto_merged']}")
+            _emit("\n建议合并:")
+            for variant, canon, reason in stats.get("suggestions", []):
+                _emit(f"  {variant} → {canon} ({reason})")
+            _emit("\n高频标签 Top 20:")
+            for tag, count in stats.get("frequency", {}).items():
+                _emit(f"  {count:4d}x  {tag}")
+            _emit(f"\n运行 `kb tags rebuild` 不带 --dry-run 以落盘")
+        else:
+            _emit(f"本体重建完成: {stats['canonical_forms']} 个规范标签")
+            _emit(f"种子合并: {stats['seed_merged']} | 自动合并: {stats['auto_merged']}")
+        return 0
+
+    if args.action == "normalize":
+        stats = _norm.normalize_all_notes(dry_run=args.dry_run)
+        if args.dry_run:
+            _emit(f"Dry-Run: {stats['updated']}/{stats['total']} 篇待更新")
+            _emit("运行 `kb tags normalize` 不带 --dry-run 以应用")
+        else:
+            _emit(f"标签归一化完成: {stats['updated']}/{stats['total']} 篇更新")
+            if stats["updated"] > 0:
+                _emit("提示: 标签变更后建议运行 `kb relations rebuild` 更新关联")
+        return 0
+
     _emit(f"未知操作: {args.action}", file=sys.stderr)
     return 2
 
@@ -257,6 +303,7 @@ def cmd_workflow(args: argparse.Namespace) -> int:
     else:
         result = {"entries": 0, "pipeline": workflow.run_pipeline()}
     p = result["pipeline"]
+    _emit(f"本体: {p['ontology']['canonical_forms']} 个规范标签 (合并 {p['ontology']['auto_merged']} 个)")
     _emit(f"加工: {p['processed']} 篇")
     _emit(f"关联重算: {p['relations']['updated']} 篇更新 / {p['relations']['total']} 篇总")
     _emit(f"索引: {p['index']['notes']} 笔记 / {p['index']['tags']} 标签")
@@ -354,6 +401,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("action", choices=["rebuild"],
                    help="rebuild: 全量重算所有笔记的关联关系")
     p.set_defaults(func=cmd_relations)
+
+    # tags
+    p = sub.add_parser("tags", help="标签管理 (本体重建 / 归一化)")
+    p.add_argument("action", choices=["rebuild", "normalize"],
+                   help="rebuild: 重建规范标签表 | normalize: 归一化存量标签")
+    p.add_argument("--dry-run", action="store_true", help="预览变更不改写")
+    p.add_argument("--min-freq", type=int, default=2, help="rebuild 最小频次 (默认2)")
+    p.add_argument("--threshold", type=float, default=0.90, help="rebuild 模糊匹配阈值 (默认0.90)")
+    p.set_defaults(func=cmd_tags)
 
     # qa
     p = sub.add_parser("qa", help="问答流")

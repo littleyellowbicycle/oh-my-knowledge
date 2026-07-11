@@ -110,6 +110,7 @@ def run_pipeline() -> TaskResult:
     try:
         result = workflow.run_pipeline()
         detail = [
+            f"本体: {result['ontology']['canonical_forms']} 规范标签",
             f"加工: {result['processed']} 篇",
             f"关联: {result['relations']['updated']}/{result['relations']['total']} 更新",
             f"索引: {result['index']['notes']} 笔记",

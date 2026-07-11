@@ -6,17 +6,23 @@ import logging
 
 from src import raw_store, processor, indexer, wiki_compiler, relations
 from src.gateway import is_expandable
+from src.tags import ontology as _tag_ontology
 
 logger = logging.getLogger(__name__)
 
 
 def run_pipeline() -> dict:
-    """执行加工 → 索引 → Wiki 编译管线。
+    """执行标签本体 → 加工 → 关联 → 索引 → Wiki 编译管线。
 
     Returns:
-        {"processed": int, "index": dict, "wiki": int}
+        {"ontology": dict, "processed": int, "relations": dict, "index": dict, "wiki": int}
     """
-    logger.info("=== Step 1/3: process_pending ===")
+    logger.info("=== Step 0/5: build_tag_ontology ===")
+    onto_stats = _tag_ontology.build_ontology(min_freq=2, fuzzy_threshold=0.90, dry_run=False)
+    logger.info("本体: %d 个规范标签 (合并 %d 个同义)",
+                onto_stats["canonical_forms"], onto_stats["auto_merged"])
+
+    logger.info("=== Step 1/5: process_pending ===")
     paths = processor.process_pending()
     logger.info("加工完成: %d 篇", len(paths))
 
@@ -29,11 +35,12 @@ def run_pipeline() -> dict:
     logger.info("索引完成: notes=%d wiki=%d tags=%d",
                 stats["notes"], stats["wiki"], stats["tags"])
 
-    logger.info("=== Step 4/4: compile_wiki ===")
+    logger.info("=== Step 5/5: compile_wiki ===")
     wiki_results = wiki_compiler.compile_all_wiki()
     logger.info("Wiki 编译完成: %d 篇", len(wiki_results))
 
     return {
+        "ontology": onto_stats,
         "processed": len(paths),
         "relations": rel_stats,
         "index": stats,
