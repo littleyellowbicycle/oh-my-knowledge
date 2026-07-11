@@ -6,6 +6,7 @@
     kb ingest --stdin               从 stdin 读取 (管道时自动检测)
     kb process [--all|--raw <id>]   加工原料为 Obsidian 笔记 (含关联引擎钩子)
     kb index                        全量重建索引层
+    kb relations rebuild            全量重算关联关系
     kb qa "<question>"              问答流 (查索引->读结论->作答)
     kb wiki [--all|--topic <tag>]   Wiki 编译 (关联簇 >= 3)
     kb wiki --lint                  Wiki 健康自检
@@ -90,6 +91,17 @@ def cmd_index(args: argparse.Namespace) -> int:
     stats = indexer.rebuild_index()
     _emit(f"索引重建完成: {json.dumps(stats, ensure_ascii=False)}")
     return 0
+
+
+def cmd_relations(args: argparse.Namespace) -> int:
+    """关联关系管理。"""
+    from src import relations
+    if args.action == "rebuild":
+        stats = relations.rebuild_all_relations()
+        _emit(f"全量关联重算: {stats['updated']} 篇更新 / {stats['total']} 篇总")
+        return 0
+    _emit(f"未知操作: {args.action}", file=sys.stderr)
+    return 2
 
 
 def cmd_qa(args: argparse.Namespace) -> int:
@@ -246,6 +258,7 @@ def cmd_workflow(args: argparse.Namespace) -> int:
         result = {"entries": 0, "pipeline": workflow.run_pipeline()}
     p = result["pipeline"]
     _emit(f"加工: {p['processed']} 篇")
+    _emit(f"关联重算: {p['relations']['updated']} 篇更新 / {p['relations']['total']} 篇总")
     _emit(f"索引: {p['index']['notes']} 笔记 / {p['index']['tags']} 标签")
     _emit(f"Wiki: {p['wiki']} 篇综述")
     return 0
@@ -335,6 +348,12 @@ def build_parser() -> argparse.ArgumentParser:
     # index
     p = sub.add_parser("index", help="全量重建索引层")
     p.set_defaults(func=cmd_index)
+
+    # relations
+    p = sub.add_parser("relations", help="关联关系管理")
+    p.add_argument("action", choices=["rebuild"],
+                   help="rebuild: 全量重算所有笔记的关联关系")
+    p.set_defaults(func=cmd_relations)
 
     # qa
     p = sub.add_parser("qa", help="问答流")

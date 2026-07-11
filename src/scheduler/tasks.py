@@ -111,6 +111,7 @@ def run_pipeline() -> TaskResult:
         result = workflow.run_pipeline()
         detail = [
             f"加工: {result['processed']} 篇",
+            f"关联: {result['relations']['updated']}/{result['relations']['total']} 更新",
             f"索引: {result['index']['notes']} 笔记",
             f"Wiki: {result['wiki']} 篇",
         ]

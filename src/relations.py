@@ -18,6 +18,7 @@ from __future__ import annotations
 import datetime as _dt
 import logging
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
@@ -232,3 +233,88 @@ def remove_note_relations(note_stem: str) -> int:
     if changed:
         logger.info("回滚清理: 从 %d 篇笔记移除了指向 %s 的关联", changed, note_stem)
     return changed
+
+
+# ---------- 全量重算 ----------
+
+@dataclass
+class _NoteInfo:
+    path: Path
+    stem: str
+    tags: set[str]
+    title_tokens: set[str]
+
+
+def _load_all_notes() -> list[_NoteInfo]:
+    """一次性读入所有加工层笔记的 frontmatter (标签 + 标题分词)。"""
+    notes: list[_NoteInfo] = []
+    for p in sorted(settings.PROCESSED_DIR.glob("*.md")):
+        try:
+            post = _load_note(p)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("读取失败 %s: %s", p.name, e)
+            continue
+        tags = {_normalize_tag(t) for t in post.metadata.get("tags", [])}
+        title_tokens = _tokenize(post.metadata.get("title", ""))
+        notes.append(_NoteInfo(path=p, stem=p.stem, tags=tags, title_tokens=title_tokens))
+    return notes
+
+
+def _overwrite_related(path: Path, related: list[str]) -> bool:
+    """覆写笔记的 related 字段 + 相关笔记段。
+
+    与 _update_note_related 不同：直接覆盖，不追加。
+    返回是否有变更。
+    """
+    post = _load_note(path)
+    old_related: list[str] = list(post.metadata.get("related", []) or [])
+
+    # 去重 + 去自身
+    final = list(dict.fromkeys(r for r in related if r != path.stem))
+
+    if final == old_related:
+        return False
+
+    post.metadata["related"] = final
+    post.metadata["updated"] = _dt.date.today().isoformat()
+    post.content = _rewrite_related_section(post.content, final)
+    path.write_text(frontmatter.dumps(post, sort_keys=False), encoding="utf-8")
+    return True
+
+
+def rebuild_all_relations() -> dict:
+    """全量重算所有加工层笔记的关联关系。
+
+    流程:
+        1. 一次性读入全部笔记 frontmatter (O(n) I/O)
+        2. 内存中两两打分 (O(n²) 集合运算)
+        3. 仅写回有变更的笔记 (按需写入)
+
+    Returns:
+        {"total": int, "updated": int}
+    """
+    notes = _load_all_notes()
+    updated = 0
+
+    for i, note in enumerate(notes):
+        hits: list[tuple[str, int]] = []
+        for j, other in enumerate(notes):
+            if i == j:
+                continue
+            tag_overlap = len(note.tags & other.tags)
+            if tag_overlap == 0:
+                # 标签无重合时跳过标题分词比较（常见优化）
+                continue
+            token_overlap = len(note.title_tokens & other.title_tokens)
+            score = tag_overlap * 3 + token_overlap * 1
+            if score >= settings.RELATION_SCORE_THRESHOLD:
+                hits.append((other.stem, score))
+
+        hits.sort(key=lambda x: x[1], reverse=True)
+        top_stems = [stem for stem, _ in hits[: settings.RELATION_TOP_N]]
+
+        if _overwrite_related(note.path, top_stems):
+            updated += 1
+
+    logger.info("全量关联重算: %d 篇总, %d 篇更新", len(notes), updated)
+    return {"total": len(notes), "updated": updated}

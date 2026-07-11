@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from src import raw_store, processor, indexer, wiki_compiler
+from src import raw_store, processor, indexer, wiki_compiler, relations
 from src.gateway import is_expandable
 
 logger = logging.getLogger(__name__)
@@ -20,17 +20,22 @@ def run_pipeline() -> dict:
     paths = processor.process_pending()
     logger.info("加工完成: %d 篇", len(paths))
 
-    logger.info("=== Step 2/3: rebuild_index ===")
+    logger.info("=== Step 2/4: rebuild_all_relations ===")
+    rel_stats = relations.rebuild_all_relations()
+    logger.info("关联重算: %d 篇更新 / %d 篇总", rel_stats["updated"], rel_stats["total"])
+
+    logger.info("=== Step 3/4: rebuild_index ===")
     stats = indexer.rebuild_index()
     logger.info("索引完成: notes=%d wiki=%d tags=%d",
                 stats["notes"], stats["wiki"], stats["tags"])
 
-    logger.info("=== Step 3/3: compile_wiki ===")
+    logger.info("=== Step 4/4: compile_wiki ===")
     wiki_results = wiki_compiler.compile_all_wiki()
     logger.info("Wiki 编译完成: %d 篇", len(wiki_results))
 
     return {
         "processed": len(paths),
+        "relations": rel_stats,
         "index": stats,
         "wiki": len(wiki_results),
     }
