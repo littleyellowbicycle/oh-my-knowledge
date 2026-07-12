@@ -33,6 +33,22 @@ _API_BASE = os.getenv("LITELLM_API_BASE")
 if _API_BASE:
     litellm.api_base = _API_BASE
 
+# MiniMax-M3 对长提示返回 finish_reason='abort'，但 LiteLLM 的
+# OpenAIChatCompletionFinishReason Literal 未包含该值 → Pydantic 校验失败。
+# 此处 patch Choices.__init__ 在传入 Pydantic 前将 'abort' → 'stop'。
+import litellm.types.utils as _types_utils
+
+_orig_choices_init = _types_utils.Choices.__init__
+
+
+def _patched_choices_init(self, finish_reason=None, **kwargs):
+    if finish_reason == "abort":
+        finish_reason = "stop"
+    _orig_choices_init(self, finish_reason=finish_reason, **kwargs)
+
+
+_types_utils.Choices.__init__ = _patched_choices_init
+
 T = TypeVar("T", bound=BaseModel)
 
 logger = logging.getLogger(__name__)

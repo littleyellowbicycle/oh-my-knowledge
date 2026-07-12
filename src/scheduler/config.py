@@ -10,7 +10,13 @@ import os
 # ---- 知乎收藏夹 ----
 # 每日自动抓取的收藏夹 URL 列表（需配套 cookies_zhihu.json）
 ZHIHU_COLLECTIONS: list[str] = [
-    # "https://www.zhihu.com/collection/xxx",
+    "https://www.zhihu.com/collection/448510037",
+    "https://www.zhihu.com/collection/821959165",
+    "https://www.zhihu.com/collection/583892568",
+    "https://www.zhihu.com/collection/866580141",
+    "https://www.zhihu.com/collection/455841079",
+    "https://www.zhihu.com/collection/492284090",
+    "https://www.zhihu.com/collection/988004399",
 ]
 
 # ---- GitHub Trending ----
