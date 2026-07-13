@@ -21,7 +21,6 @@ import datetime as _dt
 import hashlib
 import json
 import logging
-import os
 from pathlib import Path
 
 from src.config import settings
@@ -29,9 +28,6 @@ from src.schemas import RawEntry, RawStatus, SourceType
 from src import gateway
 
 logger = logging.getLogger(__name__)
-
-# 原料文件不可变: 写入后设为只读 (与 Obsidian 冲突，默认关闭)
-_IMMUTABLE = False
 
 
 # ---------- ID 与文件名生成 ----------
@@ -72,13 +68,6 @@ def _save(entry: RawEntry) -> RawEntry:
         json.dumps(entry.to_meta(), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-
-    if _IMMUTABLE:
-        try:
-            os.chmod(content_path, 0o444)
-            os.chmod(meta_path, 0o444)
-        except OSError as e:
-            logger.debug("chmod 只读失败 (Windows 可忽略): %s", e)
 
     logger.info("原料落盘: %s (type=%s, %d 字符)",
                 entry.id, entry.source_type, len(entry.original_text))
@@ -192,31 +181,15 @@ def list_raw(status: RawStatus | None = None) -> list[str]:
 
 def mark_status(raw_id: str, status: RawStatus) -> None:
     """推进原料状态 (pending -> processed -> indexed)。
-
-    原料层"不可变"针对原文；meta 中的状态字段允许推进。
-    实现方式: 解除只读 -> 改写 -> 重新只读。
     """
     meta_path = _meta_path(raw_id)
     if not meta_path.exists():
         raise FileNotFoundError(f"原料不存在: {raw_id}")
-    _chmod_writable(meta_path)
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     meta["status"] = status.value
     meta_path.write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    if _IMMUTABLE:
-        try:
-            os.chmod(meta_path, 0o444)
-        except OSError:
-            pass
-
-
-def _chmod_writable(p: Path) -> None:
-    try:
-        os.chmod(p, 0o666)
-    except OSError:
-        pass
 
 
 def iter_pending() -> list[str]:
