@@ -20,7 +20,7 @@ ZHIHU_COLLECTIONS: list[str] = [
 ]
 
 # ---- GitHub Trending ----
-TRENDING_LANGUAGES: list[str] = ["python", "typescript", "rust"]
+TRENDING_LANGUAGES: list[str] = ["any"]  # "any" = 所有语言, 或指定 ["python", "typescript"]
 TRENDING_SINCE: str = "daily"  # daily / weekly
 
 # ---- 调度时间 ----

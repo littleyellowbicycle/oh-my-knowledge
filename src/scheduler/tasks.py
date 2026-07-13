@@ -145,11 +145,13 @@ def run_daily() -> list[TaskResult]:
 
 # ---------- GitHub Trending 爬虫 ----------
 def _scrape_trending(language: str, since: str = "daily") -> list[dict]:
-    """爬取 github.com/trending/{language} 返回仓库列表。
+    """爬取 github.com/trending 返回仓库列表。
 
+    language="any" 时不指定语言，抓取所有语言的热榜。
     返回: [{name, url, description, stars, today_stars, language}]
     """
-    url = f"https://github.com/trending/{language}?since={since}"
+    path = f"/trending/{language}" if language != "any" else "/trending"
+    url = f"https://github.com{path}?since={since}"
     resp = requests.get(url, timeout=config.FETCH_TIMEOUT, headers={
         "User-Agent": "Mozilla/5.0 (my-knowledge-base scheduler)"
     })
