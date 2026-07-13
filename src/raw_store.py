@@ -30,8 +30,8 @@ from src import gateway
 
 logger = logging.getLogger(__name__)
 
-# 原料文件不可变: 写入后设为只读 (Windows chmod 表现有限，但保留语义)
-_IMMUTABLE = True
+# 原料文件不可变: 写入后设为只读 (与 Obsidian 冲突，默认关闭)
+_IMMUTABLE = False
 
 
 # ---------- ID 与文件名生成 ----------
