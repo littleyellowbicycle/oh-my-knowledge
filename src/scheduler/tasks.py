@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import datetime as _dt
 import logging
+import os
+import re
 import time
 from dataclasses import dataclass, field
 
@@ -73,11 +75,14 @@ def fetch_github_trending() -> TaskResult:
     for lang in config.TRENDING_LANGUAGES:
         try:
             repos = _scrape_trending(lang, config.TRENDING_SINCE)
+            count = 0
             for repo in repos:
-                text = _format_trending_repo(repo)
-                entry = raw_store.save_manual(text)
+                readme = _fetch_readme(repo["url"])
+                text = _format_trending_repo(repo, readme)
+                raw_store.save_manual(text, source_url=repo["url"])
+                count += 1
                 total += 1
-            detail.append(f"{lang}: {len(repos)} 个仓库")
+            detail.append(f"{lang}: {count} 个仓库")
         except Exception as e:  # noqa: BLE001
             logger.warning("[%s] 抓取 %s 失败: %s", name, lang, e)
             detail.append(f"{lang}: 失败 - {e}")
@@ -179,13 +184,52 @@ def _scrape_trending(language: str, since: str = "daily") -> list[dict]:
     return repos
 
 
-def _format_trending_repo(repo: dict) -> str:
-    """将单个 trending 仓库格式化为 raw markdown。"""
-    return (
-        f"# GitHub Trending: {repo['name']}\n\n"
-        f"- URL: {repo['url']}\n"
-        f"- Stars: {repo['stars']}\n"
-        f"- Today: {repo['today_stars']}\n"
-        f"- Language: {repo['language']}\n"
-        f"- Description: {repo['description']}\n"
-    )
+def _fetch_readme(repo_url: str, max_chars: int = 30000) -> str:
+    """从 GitHub API 拉取仓库 README（原始 markdown）。
+
+    支持 GITHUB_TOKEN 环境变量提高 API 速率限制（60 → 5000 次/小时）。
+    """
+    match = re.match(r"https://github\.com/([^/]+/[^/]+)", repo_url)
+    if not match:
+        return ""
+    repo_path = match.group(1)
+    try:
+        headers = {
+            "Accept": "application/vnd.github.v3.raw",
+            "User-Agent": "my-knowledge-base/1.0",
+        }
+        token = os.getenv("GITHUB_TOKEN")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        resp = requests.get(
+            f"https://api.github.com/repos/{repo_path}/readme",
+            headers=headers,
+            timeout=15,
+        )
+        if resp.ok:
+            text = resp.text
+            if len(text) > max_chars:
+                text = text[:max_chars] + "\n\n[... README 过长，已截断 ...]"
+            return text
+        logger.warning("获取 README 失败 %s: HTTP %d", repo_path, resp.status_code)
+    except Exception as e:
+        logger.warning("获取 README 异常 %s: %s", repo_path, e)
+    return ""
+
+
+def _format_trending_repo(repo: dict, readme: str = "") -> str:
+    """将单个 trending 仓库格式化为 raw markdown。
+
+    如果提供了 readme 正文，追加到元信息之后，供 processor 参考。
+    """
+    parts = [
+        f"# GitHub Trending: {repo['name']}\n",
+        f"- URL: {repo['url']}\n",
+        f"- Stars: {repo['stars']}\n",
+        f"- Today: {repo['today_stars']}\n",
+        f"- Language: {repo['language']}\n",
+        f"- Description: {repo['description']}\n",
+    ]
+    if readme:
+        parts.append(f"\n--- README 原文 ---\n{readme}\n")
+    return "\n".join(parts)

@@ -35,6 +35,24 @@ def _now_iso() -> str:
     return _dt.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
 
+def _normalize_url(url: str) -> str:
+    """URL 归一化：去尾部斜杠，统一用于去重比较。"""
+    return url.rstrip("/")
+
+
+def _find_existing_by_url(url: str) -> str | None:
+    """扫描 meta 文件查找指定 source_url，返回已有的 raw_id 或 None。"""
+    url = _normalize_url(url)
+    for p in settings.RAW_DIR.glob("*.meta.json"):
+        try:
+            meta = json.loads(p.read_text(encoding="utf-8"))
+            if _normalize_url(meta.get("source_url", "")) == url:
+                return meta["id"]
+        except Exception:
+            continue
+    return None
+
+
 def _gen_raw_id(text: str) -> str:
     """生成 raw_{YYYYMMDD_HHMMSS}_{8位hash} 形式的 ID。"""
     ts = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -74,15 +92,27 @@ def _save(entry: RawEntry) -> RawEntry:
     return entry
 
 
-def save_manual(text: str) -> RawEntry:
-    """手动输入 -> 归一化 -> 落盘。"""
+def save_manual(text: str, source_url: str | None = None) -> RawEntry:
+    """手动输入 -> 归一化 -> 落盘。
+
+    Args:
+        text:       原文内容
+        source_url: 可选的来源 URL（提供时自动按 URL 去重）
+
+    自动去重：如果 source_url 已存在，返回现有条目，不重复落盘。
+    """
     text = (text or "").strip()
     if not text:
         raise ValueError("手动输入内容不能为空")
+    if source_url:
+        existing_id = _find_existing_by_url(source_url)
+        if existing_id:
+            logger.info("URL 重复，返回已有条目: %s (%s)", source_url, existing_id)
+            return load_raw(existing_id)
     entry = RawEntry(
         id=_gen_raw_id(text),
         source_type=SourceType.MANUAL,
-        source_url=None,
+        source_url=source_url,
         original_text=text,
         ingested_at=_now_iso(),
         status=RawStatus.PENDING,
@@ -97,10 +127,18 @@ def save_link(url: str, text: str | None = None, cookies: dict | None = None) ->
         url:     目标链接
         text:    可选，已抓取的文本；None 则自动调用 gateway.fetch_url(url)
         cookies: 可选登录态 (传递给网关通道，如知乎 cookie)
+
+    自动去重：如果 source_url 已存在，返回现有条目，不重复落盘。
     """
     url = (url or "").strip()
     if not url:
         raise ValueError("URL 不能为空")
+
+    existing_id = _find_existing_by_url(url)
+    if existing_id:
+        logger.info("URL 重复，返回已有条目: %s (%s)", url, existing_id)
+        return load_raw(existing_id)
+
     if text is None:
         text = gateway.fetch_url(url, cookies=cookies)
     if not text or not text.strip():
